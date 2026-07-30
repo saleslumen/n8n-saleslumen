@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-saleslumen.saleslumenCampaigns",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Sales", "Marketing"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://developers.saleslumen.com/en-US/campaigns/guides/authentication"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://developers.saleslumen.com/en-US/campaigns/guides/getting-started"
+			}
+		]
+	}
+}

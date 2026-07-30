@@ -1,0 +1,61 @@
+{
+	"name": "n8n-nodes-saleslumen",
+	"version": "0.1.0",
+	"description": "Saleslumen verified community nodes for Emails, Campaigns, Workflows, and Apps Script",
+	"license": "MIT",
+	"homepage": "https://developers.saleslumen.com",
+	"keywords": [
+		"n8n-community-node-package",
+		"saleslumen",
+		"email",
+		"discover",
+		"verify",
+		"campaigns",
+		"workflows",
+		"apps-script"
+	],
+	"author": {
+		"name": "Saleslumen",
+		"email": "qasim@skynur.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/saleslumen/n8n-nodes-saleslumen.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/SaleslumenApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/SaleslumenEmails/SaleslumenEmails.node.js",
+			"dist/nodes/SaleslumenCampaigns/SaleslumenCampaigns.node.js",
+			"dist/nodes/SaleslumenWorkflows/SaleslumenWorkflows.node.js",
+			"dist/nodes/SaleslumenAppsScript/SaleslumenAppsScript.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "*",
+		"eslint": "9.32.0",
+		"prettier": "3.6.2",
+		"release-it": "^19.0.4",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	},
+	"dependencies": {}
+}
