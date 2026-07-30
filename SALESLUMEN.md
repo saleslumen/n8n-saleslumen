@@ -62,7 +62,7 @@ Each folder must contain: `<Class>.node.ts`, `<Class>.node.json`, `saleslumen.sv
 
 ### Campaigns
 
-- Core lifecycle: create/get/list campaigns; enroll people; attach useful sequence/people ops from getting-started
+- Core lifecycle: campaign CRUD; person enroll; sequence CRUD + reorder steps; step CRUD (archive on delete)
 - Host: campaigns API; docs under `developers/docs/website/docs/campaigns/`
 - Prefer declarative-friendly REST inside programmatic `execute` (resource+operation switch)
 

@@ -5,7 +5,7 @@ Saleslumen verified community nodes — one package, one node per product:
 | Node | Host | v1 ops |
 | --- | --- | --- |
 | Saleslumen Emails | `emails.saleslumenapis.com` | Discover, Verify, Verify Catch-All |
-| Saleslumen Campaigns | `campaigns.saleslumenapis.com` | Campaign create/get/list/update, Person enroll |
+| Saleslumen Campaigns | `campaigns.saleslumenapis.com` | Campaign CRUD, Person enroll, Sequence CRUD + reorder steps, Step CRUD |
 | Saleslumen Workflows | `workflows.saleslumenapis.com` | Workflow create/get/list, Execution start/get |
 | Saleslumen Apps Script | `script.saleslumenapis.com` | Project create/get/update content, Function run |
 
