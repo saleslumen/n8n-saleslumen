@@ -80,14 +80,6 @@ export function mapSaleslumenApiError(
 	});
 }
 
-export async function sleep(ms: number): Promise<void> {
-	await new Promise<void>((resolve) => {
-		// Poll delay only. Cloud forbids node:timers imports.
-		// eslint-disable-next-line @n8n/community-nodes/no-restricted-globals
-		setTimeout(resolve, ms);
-	});
-}
-
 export function parseNdjson(body: string): IDataObject[] {
 	return body
 		.split(/\r?\n/)

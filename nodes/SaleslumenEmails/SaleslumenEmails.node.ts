@@ -6,8 +6,8 @@ import type {
 	INodeTypeDescription,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
-import { parseNdjson, saleslumenApiRequest, sleep } from '../shared/transport';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
+import { parseNdjson, saleslumenApiRequest } from '../shared/transport';
 
 type DiscoverResponse = {
 	kind?: string;
