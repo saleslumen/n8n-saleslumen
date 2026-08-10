@@ -1,8 +1,8 @@
 {
-	"node": "n8n-nodes-saleslumen.saleslumenEmails",
+	"node": "@saleslumen/n8n-nodes-saleslumen.saleslumen",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
-	"categories": ["Sales", "Communication"],
+	"categories": ["Communication", "Development", "Marketing & Content", "Productivity", "Sales"],
 	"resources": {
 		"credentialDocumentation": [
 			{
@@ -11,7 +11,7 @@
 		],
 		"primaryDocumentation": [
 			{
-				"url": "https://developers.saleslumen.com/en-US/emails/guides/discover-and-validate"
+				"url": "https://developers.saleslumen.com"
 			}
 		]
 	}

@@ -1,25 +1,22 @@
 # Saleslumen n8n package — agent harmony
 
-One npm package (`n8n-nodes-saleslumen`), one node per product, shared credential.
+One scoped npm package (`@saleslumen/n8n-nodes-saleslumen`), one Saleslumen action node, and one shared credential.
 
 ## Ownership (do not cross)
 
 | Owner | Paths |
 | --- | --- |
 | Front / orchestrator | `package.json`, `credentials/`, `nodes/shared/`, `AGENTS.md`, `SALESLUMEN.md`, `.github/`, root configs |
-| Emails agent | `nodes/SaleslumenEmails/**` only |
-| Campaigns agent | `nodes/SaleslumenCampaigns/**` only |
-| Workflows agent | `nodes/SaleslumenWorkflows/**` only |
-| Apps Script agent | `nodes/SaleslumenAppsScript/**` only |
+| Saleslumen node | `nodes/Saleslumen/**` |
 
-Do **not** edit another agent’s folder. Do **not** change `package.json` credentials/nodes lists (already registered). Do **not** add runtime `dependencies`.
+Do **not** change `package.json` credentials/nodes lists unless the registered node or credential changes. Do **not** add runtime `dependencies`.
 
 ## Shared system (use these)
 
 - Credential type name: `saleslumenApi` (`credentials/SaleslumenApi.credentials.ts`)
 - Headers injected: `sl-api-key`, `sl-organization-id` — never org API key as `Authorization: Bearer`
 - Transport: `nodes/shared/transport.ts` → `saleslumenApiRequest`, `mapSaleslumenApiError`, `parseNdjson`, `sleep`, `PRODUCT_BASE_URLS`
-- Style: **programmatic** `execute()` for every product node
+- Style: one programmatic node with resource-specific property and execution modules
 - Docs to follow: root `AGENTS.md` + `.agents/*` + [n8n UX guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/ux-guidelines/)
 - Monorepo API source of truth: `/home/qasim/Repositories/saleslumen/developers/docs/website/docs/<product>/`
 
@@ -32,16 +29,15 @@ Do **not** edit another agent’s folder. Do **not** change `package.json` crede
 | Workflows | `https://workflows.saleslumenapis.com` |
 | Apps Script | `https://script.saleslumenapis.com` |
 
-## Node naming
+## Node structure
 
-| Display name | `name` | Folder / class |
-| --- | --- | --- |
-| Saleslumen Emails | `saleslumenEmails` | `SaleslumenEmails` |
-| Saleslumen Campaigns | `saleslumenCampaigns` | `SaleslumenCampaigns` |
-| Saleslumen Workflows | `saleslumenWorkflows` | `SaleslumenWorkflows` |
-| Saleslumen Apps Script | `saleslumenAppsScript` | `SaleslumenAppsScript` |
+| Purpose | Path |
+| --- | --- |
+| Registered node and codex | `nodes/Saleslumen/Saleslumen.node.ts`, `nodes/Saleslumen/Saleslumen.node.json` |
+| Resource modules | `nodes/Saleslumen/appsScript.ts`, `campaigns.ts`, `emails.ts`, `workflows.ts` |
+| Shared transport | `nodes/shared/transport.ts` |
 
-Each folder must contain: `<Class>.node.ts`, `<Class>.node.json`, `saleslumen.svg`, `saleslumen.dark.svg` (or product-specific icons). Import shared helpers with a relative path (`../shared/transport`).
+The registered node exposes Email, Campaign, Workflow, and Apps Script as resources. Resource modules own their operation parameters and execution logic.
 
 ## Quality bar before done
 
@@ -79,5 +75,5 @@ Each folder must contain: `<Class>.node.ts`, `<Class>.node.json`, `saleslumen.sv
 ## Verified-node constraints
 
 - MIT, no runtime dependencies, no `process.env` / filesystem
-- One third-party service (Saleslumen) with product nodes — not unrelated APIs
+- One third-party service and one regular action node with product resources
 - Publish later via GitHub Actions provenance (orchestrator owns release)

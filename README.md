@@ -1,24 +1,49 @@
-# n8n-nodes-saleslumen
+# @saleslumen/n8n-nodes-saleslumen
 
-Saleslumen verified community nodes — one package, one node per product:
+Use Saleslumen Emails, Campaigns, Workflows, and Apps Script from one n8n action node.
 
-| Node | Host | v1 ops |
-| --- | --- | --- |
-| Saleslumen Emails | `emails.saleslumenapis.com` | Discover, Verify, Verify Catch-All |
-| Saleslumen Campaigns | `campaigns.saleslumenapis.com` | Campaign CRUD, Person enroll, Sequence CRUD + reorder steps, Step CRUD |
-| Saleslumen Workflows | `workflows.saleslumenapis.com` | Workflow create/get/list, Execution start/get |
-| Saleslumen Apps Script | `script.saleslumenapis.com` | Project create/get/update content, Function run |
+## Installation
 
-## Auth
+To install the package in n8n:
 
-Credential **Saleslumen API**:
+1. Open **Settings → Community Nodes**.
+2. Select **Install**.
+3. Enter `@saleslumen/n8n-nodes-saleslumen` as the npm package name.
+4. Accept the community-node installation notice and select **Install**.
 
-- `sl-api-key: sl_key_...`
-- `sl-organization-id: <uuid>`
+After installation, add the **Saleslumen** node to a workflow.
 
-Never send an organization API key as `Authorization: Bearer`.
+## Authentication
 
-## Develop
+Create a **Saleslumen API** credential in n8n with:
+
+- **API Key**: Your organization API key, such as `sl_key_...`.
+- **Organization ID**: Your organization UUID.
+
+The credential sends `sl-api-key` and `sl-organization-id`. Organization API keys are never sent as bearer tokens.
+
+## Resources and operations
+
+| Resource | Operations |
+| --- | --- |
+| Email | Discover, Verify, Verify Catch-All |
+| Campaign | Create, get, list, and update campaigns; enroll people; create, get, list, update, delete, and reorder sequences and steps |
+| Workflow | Create, get, and list workflows; start and get executions |
+| Apps Script | Create and get projects, update project content, and run functions |
+
+## Example: verify an email address
+
+1. Create a workflow and add a **Manual Trigger** node.
+2. Add the **Saleslumen** node and connect it to the trigger.
+3. Select or create your **Saleslumen API** credential.
+4. Set **Resource** to **Email**.
+5. Set **Operation** to **Verify**.
+6. Enter `alex@example.com` in **Email**. Alternatively, leave **Email** empty and provide an `email` field in each incoming item.
+7. Run the workflow. The node emits one item for each verification result.
+
+For API behavior and response fields, see the [Saleslumen developer documentation](https://developers.saleslumen.com).
+
+## Development
 
 ```bash
 npm install
@@ -27,4 +52,4 @@ npm run lint
 npm run dev
 ```
 
-Agent rules: `AGENTS.md` + `SALESLUMEN.md`. Docs: https://developers.saleslumen.com
+Development rules are documented in `AGENTS.md` and `SALESLUMEN.md`.

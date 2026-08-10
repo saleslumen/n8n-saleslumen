@@ -2,11 +2,10 @@ import type {
 	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
-	INodeType,
-	INodeTypeDescription,
+	INodeProperties,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
 import { parseNdjson, saleslumenApiRequest } from '../shared/transport';
 
 type DiscoverResponse = {
@@ -15,158 +14,137 @@ type DiscoverResponse = {
 	data?: IDataObject;
 };
 
-export class SaleslumenEmails implements INodeType {
-	description: INodeTypeDescription = {
-		displayName: 'Saleslumen Emails',
-		name: 'saleslumenEmails',
-		icon: { light: 'file:product.svg', dark: 'file:product.dark.svg' },
-		group: ['transform'],
-		version: [1],
-		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-		description: 'Discover and verify email addresses with Saleslumen Emails',
-		defaults: { name: 'Saleslumen Emails' },
-		inputs: [NodeConnectionTypes.Main],
-		outputs: [NodeConnectionTypes.Main],
-		credentials: [{ name: 'saleslumenApi', required: true }],
-		usableAsTool: true,
-		properties: [
+export const emailsProperties: INodeProperties[] = [
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { resource: ['emails'] } },
+		options: [
 			{
-				displayName: 'Resource',
-				name: 'resource',
-				type: 'options',
-				noDataExpression: true,
-				options: [{ name: 'Tool', value: 'tool' }],
-				default: 'tool',
+				name: 'Discover',
+				value: 'discover',
+				action: 'Discover email',
+				description: 'Find a person email for a domain',
 			},
 			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				displayOptions: { show: { resource: ['tool'] } },
-				options: [
-					{
-						name: 'Discover',
-						value: 'discover',
-						action: 'Discover email',
-						description: 'Find a person email for a domain',
-					},
-					{
-						name: 'Verify',
-						value: 'verify',
-						action: 'Verify emails',
-						description: 'Run standard email verification',
-					},
-					{
-						name: 'Verify Catch-All',
-						value: 'verifyCatchAll',
-						action: 'Verify catch all emails',
-						description: 'Run catch-all email verification',
-					},
-				],
-				default: 'discover',
+				name: 'Verify',
+				value: 'verify',
+				action: 'Verify emails',
+				description: 'Run standard email verification',
 			},
 			{
-				displayName: 'Domain',
-				name: 'domain',
-				type: 'string',
-				required: true,
-				default: '',
-				placeholder: 'e.g. example.com',
-				displayOptions: { show: { resource: ['tool'], operation: ['discover'] } },
-				description: 'Company domain to search',
-			},
-			{
-				displayName: 'Name',
-				name: 'name',
-				type: 'string',
-				required: true,
-				default: '',
-				placeholder: 'e.g. Jane Doe',
-				displayOptions: { show: { resource: ['tool'], operation: ['discover'] } },
-				description: 'Person name to resolve',
-			},
-			{
-				displayName: 'Email',
-				name: 'email',
-				type: 'string',
-				default: '',
-				placeholder: 'e.g. nathan@example.com',
-				displayOptions: { show: { resource: ['tool'], operation: ['verify', 'verifyCatchAll'] } },
-				description: 'Email to verify. Leave empty to use the email field from each input item.',
-			},
-			{
-				displayName: 'Email Field',
-				name: 'emailField',
-				type: 'string',
-				default: 'email',
-				displayOptions: { show: { resource: ['tool'], operation: ['verify', 'verifyCatchAll'] } },
-				description: 'Input item field that holds the email when Email is empty',
-			},
-			{
-				displayName: 'Batch',
-				name: 'batch',
-				type: 'boolean',
-				default: true,
-				displayOptions: { show: { resource: ['tool'], operation: ['verify', 'verifyCatchAll'] } },
-				description: 'Whether to send all input emails in one request and fan out address results',
-			},
-			{
-				displayName: 'Options',
-				name: 'options',
-				type: 'collection',
-				placeholder: 'Add Option',
-				default: {},
-				options: [
-					{
-						displayName: 'Poll Interval (Ms)',
-						name: 'pollIntervalMs',
-						type: 'number',
-						default: 2000,
-						description: 'Delay between discover status polls',
-					},
-					{
-						displayName: 'Max Wait (Ms)',
-						name: 'maxWaitMs',
-						type: 'number',
-						default: 300000,
-						description: 'Maximum time to wait for discover to finish',
-					},
-					{
-						displayName: 'Include Summary',
-						name: 'includeSummary',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to emit the final verify summary line as an item',
-					},
-					{
-						displayName: 'Timeout (Ms)',
-						name: 'timeoutMs',
-						type: 'number',
-						default: 600000,
-						description: 'HTTP timeout for verify streams',
-					},
-				],
+				name: 'Verify Catch-All',
+				value: 'verifyCatchAll',
+				action: 'Verify catch all emails',
+				description: 'Run catch-all email verification',
 			},
 		],
-	};
+		default: 'discover',
+	},
+	{
+		displayName: 'Domain',
+		name: 'domain',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. example.com',
+		displayOptions: { show: { resource: ['emails'], operation: ['discover'] } },
+		description: 'Company domain to search',
+	},
+	{
+		displayName: 'Name',
+		name: 'name',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. Jane Doe',
+		displayOptions: { show: { resource: ['emails'], operation: ['discover'] } },
+		description: 'Person name to resolve',
+	},
+	{
+		displayName: 'Email',
+		name: 'email',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. nathan@example.com',
+		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		description: 'Email to verify. Leave empty to use the email field from each input item.',
+	},
+	{
+		displayName: 'Email Field',
+		name: 'emailField',
+		type: 'string',
+		default: 'email',
+		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		description: 'Input item field that holds the email when Email is empty',
+	},
+	{
+		displayName: 'Batch',
+		name: 'batch',
+		type: 'boolean',
+		default: true,
+		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		description: 'Whether to send all input emails in one request and fan out address results',
+	},
+	{
+		displayName: 'Options',
+		name: 'options',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['emails'] } },
+		options: [
+			{
+				displayName: 'Poll Interval (Ms)',
+				name: 'pollIntervalMs',
+				type: 'number',
+				default: 2000,
+				description: 'Delay between discover status polls',
+			},
+			{
+				displayName: 'Max Wait (Ms)',
+				name: 'maxWaitMs',
+				type: 'number',
+				default: 300000,
+				description: 'Maximum time to wait for discover to finish',
+			},
+			{
+				displayName: 'Include Summary',
+				name: 'includeSummary',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to emit the final verify summary line as an item',
+			},
+			{
+				displayName: 'Timeout (Ms)',
+				name: 'timeoutMs',
+				type: 'number',
+				default: 600000,
+				description: 'HTTP timeout for verify streams',
+			},
+		],
+	},
+];
 
-	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const items = this.getInputData();
-		const operation = this.getNodeParameter('operation', 0) as string;
-		if (operation === 'discover') {
-			return [await executeDiscover.call(this, items)];
-		}
-		if (operation === 'verify' || operation === 'verifyCatchAll') {
-			const stage = operation === 'verify' ? 'standard' : 'catch_all';
-			const batch = this.getNodeParameter('batch', 0, true) as boolean;
-			if (batch) {
-				return [await executeVerifyBatch.call(this, items, stage)];
-			}
-			return [await executeVerifyPerItem.call(this, items, stage)];
-		}
-		throw new NodeOperationError(this.getNode(), `Unknown operation '${operation}'`);
+export async function executeEmails(
+	this: IExecuteFunctions,
+	items: INodeExecutionData[],
+	operation: string,
+): Promise<INodeExecutionData[]> {
+	if (operation === 'discover') {
+		return await executeDiscover.call(this, items);
 	}
+	if (operation === 'verify' || operation === 'verifyCatchAll') {
+		const stage = operation === 'verify' ? 'standard' : 'catch_all';
+		const batch = this.getNodeParameter('batch', 0, true) as boolean;
+		if (batch) {
+			return await executeVerifyBatch.call(this, items, stage);
+		}
+		return await executeVerifyPerItem.call(this, items, stage);
+	}
+	throw new NodeOperationError(this.getNode(), `Unknown operation '${operation}'`);
 }
 
 async function executeDiscover(
@@ -249,7 +227,11 @@ async function executeDiscover(
 	return returnData;
 }
 
-function resolveEmail(this: IExecuteFunctions, itemIndex: number, item: INodeExecutionData): string {
+function resolveEmail(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	item: INodeExecutionData,
+): string {
 	const direct = (this.getNodeParameter('email', itemIndex, '') as string).trim();
 	if (direct) return direct;
 	const field = (this.getNodeParameter('emailField', itemIndex, 'email') as string) || 'email';
@@ -297,7 +279,8 @@ async function verifyEmailsRequest(
 			this.getNode(),
 			'Verification stream ended without a done summary',
 			{
-				description: 'Retry only unfinished addresses. Do not re-verify completed valid/invalid results.',
+				description:
+					'Retry only unfinished addresses. Do not re-verify completed valid/invalid results.',
 				itemIndex,
 			},
 		);
@@ -339,13 +322,15 @@ async function executeVerifyBatch(
 			}
 			const email = String(row.email ?? '').toLowerCase();
 			const idx = lowerEmails.indexOf(email);
-			const itemIndex = idx >= 0 ? sourceIndex[idx] : sourceIndex[0] ?? 0;
+			const itemIndex = idx >= 0 ? sourceIndex[idx] : (sourceIndex[0] ?? 0);
 			returnData.push({ json: row, pairedItem: { item: itemIndex } });
 		}
 		return returnData;
 	} catch (error) {
 		if (this.continueOnFail()) {
-			return [{ json: { error: (error as Error).message }, pairedItem: { item: sourceIndex[0] ?? 0 } }];
+			return [
+				{ json: { error: (error as Error).message }, pairedItem: { item: sourceIndex[0] ?? 0 } },
+			];
 		}
 		throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: sourceIndex[0] ?? 0 });
 	}

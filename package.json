@@ -1,7 +1,7 @@
 {
 	"name": "@saleslumen/n8n-nodes-saleslumen",
-	"version": "0.1.4",
-	"description": "Saleslumen verified community nodes for Emails, Campaigns, Workflows, and Apps Script",
+	"version": "0.2.0",
+	"description": "Saleslumen verified community node for Emails, Campaigns, Workflows, and Apps Script",
 	"license": "MIT",
 	"homepage": "https://developers.saleslumen.com",
 	"keywords": [
@@ -44,10 +44,7 @@
 			"dist/credentials/SaleslumenApi.credentials.js"
 		],
 		"nodes": [
-			"dist/nodes/SaleslumenEmails/SaleslumenEmails.node.js",
-			"dist/nodes/SaleslumenCampaigns/SaleslumenCampaigns.node.js",
-			"dist/nodes/SaleslumenWorkflows/SaleslumenWorkflows.node.js",
-			"dist/nodes/SaleslumenAppsScript/SaleslumenAppsScript.node.js"
+			"dist/nodes/Saleslumen/Saleslumen.node.js"
 		]
 	},
 	"devDependencies": {
