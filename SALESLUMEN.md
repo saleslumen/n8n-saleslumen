@@ -14,7 +14,7 @@ Do **not** change `package.json` credentials/nodes lists unless the registered n
 ## Shared system (use these)
 
 - Credential type name: `saleslumenApi` (`credentials/SaleslumenApi.credentials.ts`)
-- Headers injected: exactly one of `sl-api-key` or `Authorization: Bearer`, plus `sl-organization-id`
+- Headers injected: exactly one of `sl-api-key` or `Authorization: Bearer`, plus `sl-organization-id`, and optional `sl-namespace-id`
 - Transport: `nodes/shared/transport.ts` → `saleslumenApiRequest`, `mapSaleslumenApiError`, `parseNdjson`, `sleep`, `PRODUCT_BASE_URLS`
 - Style: one programmatic node with resource-specific property and execution modules
 - Docs to follow: root `AGENTS.md` + `.agents/*` + [n8n UX guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/ux-guidelines/)

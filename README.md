@@ -21,6 +21,7 @@ Create a **Saleslumen API** credential in n8n with:
 - **API Key**: Your organization API key, such as `sl_key_...`. Sent as `sl-api-key`.
 - **Access Token**: A user OAuth2 access token or user JWT. Sent as `Authorization: Bearer`. Required for workflow start and resume, and for Apps Script run.
 - **Organization ID**: Your organization UUID. Sent as `sl-organization-id`.
+- **Namespace ID**: Your namespace UUID. Sent as `sl-namespace-id`. Leave it empty to stay on the organization.
 
 Organization API keys are never sent as bearer tokens. An access-token credential does not send `sl-api-key`.
 

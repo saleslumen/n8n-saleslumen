@@ -54,13 +54,24 @@ export class SaleslumenApi implements ICredentialType {
 			placeholder: 'e.g. 018f...',
 			description: 'Organization UUID. Sent as sl-organization-id.',
 		},
+		{
+			displayName: 'Namespace ID',
+			name: 'namespaceId',
+			type: 'string',
+			default: '',
+			placeholder: 'e.g. 018f...',
+			description: 'Namespace UUID. Sent as sl-namespace-id. Leave it empty to stay on the organization.',
+		},
 	];
 	authenticate: IAuthenticate = async (credentials, requestOptions) => {
 		const headers: IDataObject = { ...(requestOptions.headers ?? {}) };
 		for (const key of Object.keys(headers)) {
-			if (key.toLowerCase() === 'authorization' || key.toLowerCase() === 'sl-api-key') delete headers[key];
+			const lower = key.toLowerCase();
+			if (lower === 'authorization' || lower === 'sl-api-key' || lower === 'sl-namespace-id') delete headers[key];
 		}
 		headers['sl-organization-id'] = String(credentials.organizationId ?? '');
+		const namespaceId = String(credentials.namespaceId ?? '').trim();
+		if (namespaceId) headers['sl-namespace-id'] = namespaceId;
 		if (String(credentials.authentication ?? 'apiKey') === 'accessToken') {
 			headers.Authorization = `Bearer ${String(credentials.accessToken ?? '')}`;
 		} else {
