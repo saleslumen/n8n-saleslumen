@@ -14,11 +14,11 @@ Do **not** change `package.json` credentials/nodes lists unless the registered n
 ## Shared system (use these)
 
 - Credential type name: `saleslumenApi` (`credentials/SaleslumenApi.credentials.ts`)
-- Headers injected: `sl-api-key`, `sl-organization-id` — never org API key as `Authorization: Bearer`
+- Headers injected: exactly one of `sl-api-key` or `Authorization: Bearer`, plus `sl-organization-id`
 - Transport: `nodes/shared/transport.ts` → `saleslumenApiRequest`, `mapSaleslumenApiError`, `parseNdjson`, `sleep`, `PRODUCT_BASE_URLS`
 - Style: one programmatic node with resource-specific property and execution modules
 - Docs to follow: root `AGENTS.md` + `.agents/*` + [n8n UX guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/ux-guidelines/)
-- Monorepo API source of truth: `/home/qasim/Repositories/saleslumen/developers/docs/website/docs/<product>/`
+- API reference: [Saleslumen developer documentation](https://developers.saleslumen.com)
 
 ## Product hosts
 
@@ -49,28 +49,35 @@ The registered node exposes Email, Campaign, Workflow, and Apps Script as resour
 
 ## v1 operation scopes
 
-### Emails (wedge — richest)
+### Emails
 
 - Discover → `GET /v1/tools:discover` with poll on `pending`/`running`
-- Verify → `POST /v1/tools:verify` (`text/plain`, NDJSON fan-out)
-- Verify Catch-All → `POST /v1/tools:verifyCatchAll`
-- Docs: `developers/docs/website/docs/emails/guides/discover-and-validate.md`, `.../reference/apis/tools.md`
+- Verify → `POST /v1/tools:verify` JSON `{ emails, features }` where `features` is `STANDARD`, `CATCH_ALL`, or both. Response is NDJSON.
+- Docs: [Discover and validate](https://developers.saleslumen.com/en-US/emails/guides/discover-and-validate), [Tools API](https://developers.saleslumen.com/en-US/emails/reference/apis/tools)
 
 ### Campaigns
 
-- Core lifecycle: campaign CRUD; person enroll; sequence CRUD + reorder steps; step CRUD (archive on delete)
-- Host: campaigns API; docs under `developers/docs/website/docs/campaigns/`
-- Prefer declarative-friendly REST inside programmatic `execute` (resource+operation switch)
+- Campaigns API 2.0.0 under `/v1/campaigns`
+- Create sends `display_name`, `organization` (`organizations/{id}`), and `request_id`
+- Lifecycle commands replace writing `state`: activate, pause, resume, complete, archive, unarchive
+- Update sends `campaign`, `update_mask`, `etag`, and `request_id`
+- People enroll with `POST /v1/campaigns/{id}/people`
+- Sequences are trees. Create is triggered-only. Update replaces the tree. There is no step resource.
+- Docs: [Campaigns](https://developers.saleslumen.com/en-US/campaigns)
 
 ### Workflows
 
-- Create/get workflow; start execution; get execution status (getting-started path)
-- Host: workflows API; docs under `developers/docs/website/docs/workflows/`
+- Create, update, get, list, publish, activate, deactivate
+- Start and resume require a user access token. Cancel, get, and list accept an API key.
+- Default start runs the published active workflow. `versionId` previews a draft.
+- Docs: [Workflows](https://developers.saleslumen.com/en-US/workflows)
 
 ### Apps Script
 
-- Create/get project; run function (quickstart path)
-- Host: script API; docs under `developers/docs/website/docs/apps-script/`
+- Create and get projects; replace content with `PUT /v1/projects/{script_id}/content`
+- Run is `POST /v1/scripts/{script_id}:run` and requires a user access token
+- A started failure is HTTP 200 with `response.success` false. Read `response`, not `Operation.error`.
+- Docs: [Apps Script](https://developers.saleslumen.com/en-US/apps-script)
 
 ## Verified-node constraints
 

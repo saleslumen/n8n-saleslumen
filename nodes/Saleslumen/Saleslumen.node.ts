@@ -5,6 +5,7 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { listProperties } from '../shared/list';
 import { appsScriptProperties, executeAppsScript } from './appsScript';
 import { campaignsProperties, executeCampaigns } from './campaigns';
 import { emailsProperties, executeEmails } from './emails';
@@ -19,7 +20,7 @@ export class Saleslumen implements INodeType {
 			dark: 'file:../../icons/saleslumen.dark.svg',
 		},
 		group: ['transform'],
-		version: 1,
+		version: 2,
 		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
 		description: 'Discover emails and manage Saleslumen campaigns, workflows, and scripts',
 		defaults: { name: 'Saleslumen' },
@@ -45,6 +46,7 @@ export class Saleslumen implements INodeType {
 			...campaignsProperties,
 			...emailsProperties,
 			...workflowsProperties,
+			...listProperties,
 		],
 	};
 

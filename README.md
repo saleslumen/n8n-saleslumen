@@ -17,18 +17,20 @@ After installation, add the **Saleslumen** node to a workflow.
 
 Create a **Saleslumen API** credential in n8n with:
 
-- **API Key**: Your organization API key, such as `sl_key_...`.
-- **Organization ID**: Your organization UUID.
+- **Authentication**: API Key or Access Token. Use one credential type at a time.
+- **API Key**: Your organization API key, such as `sl_key_...`. Sent as `sl-api-key`.
+- **Access Token**: A user OAuth2 access token or user JWT. Sent as `Authorization: Bearer`. Required for workflow start and resume, and for Apps Script run.
+- **Organization ID**: Your organization UUID. Sent as `sl-organization-id`.
 
-The credential sends `sl-api-key` and `sl-organization-id`. Organization API keys are never sent as bearer tokens.
+Organization API keys are never sent as bearer tokens. An access-token credential does not send `sl-api-key`.
 
 ## Resources and operations
 
 | Resource | Operations |
 | --- | --- |
-| Email | Discover, Verify, Verify Catch-All |
-| Campaign | Create, get, list, and update campaigns; enroll people; create, get, list, update, delete, and reorder sequences and steps |
-| Workflow | Create, get, and list workflows; start and get executions |
+| Email | Discover; verify with Standard, Catch-All, or both |
+| Campaign | Create, get, list, update, delete, and lifecycle commands; set variables and sender accounts; enroll a person; create, get, list, replace, and delete sequences |
+| Workflow | Create, update, get, and list workflows; publish, activate, and deactivate; start, resume, cancel, get, and list executions |
 | Apps Script | Create and get projects, update project content, and run functions |
 
 ## Example: verify an email address
@@ -38,8 +40,9 @@ The credential sends `sl-api-key` and `sl-organization-id`. Organization API key
 3. Select or create your **Saleslumen API** credential.
 4. Set **Resource** to **Email**.
 5. Set **Operation** to **Verify**.
-6. Enter `alex@example.com` in **Email**. Alternatively, leave **Email** empty and provide an `email` field in each incoming item.
-7. Run the workflow. The node emits one item for each verification result.
+6. Select **Standard** under **Features**.
+7. Enter `alex@example.com` in **Email**. Alternatively, leave **Email** empty and provide an `email` field in each incoming item.
+8. Run the workflow. The node emits one item for each verification result.
 
 For API behavior and response fields, see the [Saleslumen developer documentation](https://developers.saleslumen.com).
 
@@ -49,6 +52,7 @@ For API behavior and response fields, see the [Saleslumen developer documentatio
 npm install
 npm run build
 npm run lint
+npm test
 npm run dev
 ```
 

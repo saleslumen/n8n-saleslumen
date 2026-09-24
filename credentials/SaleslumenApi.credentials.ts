@@ -1,8 +1,9 @@
 import type {
-	IAuthenticateGeneric,
-	Icon,
+	IAuthenticate,
 	ICredentialTestRequest,
 	ICredentialType,
+	IDataObject,
+	Icon,
 	INodeProperties,
 } from 'n8n-workflow';
 
@@ -13,6 +14,16 @@ export class SaleslumenApi implements ICredentialType {
 	documentationUrl = 'https://developers.saleslumen.com/en-US/emails/guides/authentication';
 	properties: INodeProperties[] = [
 		{
+			displayName: 'Authentication',
+			name: 'authentication',
+			type: 'options',
+			options: [
+				{ name: 'API Key', value: 'apiKey' },
+				{ name: 'Access Token', value: 'accessToken' },
+			],
+			default: 'apiKey',
+		},
+		{
 			displayName: 'API Key',
 			name: 'apiKey',
 			type: 'string',
@@ -20,7 +31,19 @@ export class SaleslumenApi implements ICredentialType {
 			default: '',
 			required: true,
 			placeholder: 'e.g. sl_key_...',
-			description: 'Organization API key. Send only as sl-api-key — never as Authorization Bearer',
+			description: 'Organization API key. Sent only as sl-api-key.',
+			displayOptions: { show: { authentication: ['apiKey'] } },
+		},
+		{
+			displayName: 'Access Token',
+			name: 'accessToken',
+			type: 'string',
+			typeOptions: { password: true },
+			default: '',
+			required: true,
+			description:
+				'User OAuth2 access token or user JWT. Sent as Authorization Bearer. Required for workflow start and resume, and for Apps Script run.',
+			displayOptions: { show: { authentication: ['accessToken'] } },
 		},
 		{
 			displayName: 'Organization ID',
@@ -29,17 +52,21 @@ export class SaleslumenApi implements ICredentialType {
 			default: '',
 			required: true,
 			placeholder: 'e.g. 018f...',
-			description: 'Organization UUID. Required by product APIs; for API keys the gateway still derives org from the key',
+			description: 'Organization UUID. Sent as sl-organization-id.',
 		},
 	];
-	authenticate: IAuthenticateGeneric = {
-		type: 'generic',
-		properties: {
-			headers: {
-				'sl-api-key': '={{$credentials.apiKey}}',
-				'sl-organization-id': '={{$credentials.organizationId}}',
-			},
-		},
+	authenticate: IAuthenticate = async (credentials, requestOptions) => {
+		const headers: IDataObject = { ...(requestOptions.headers ?? {}) };
+		for (const key of Object.keys(headers)) {
+			if (key.toLowerCase() === 'authorization' || key.toLowerCase() === 'sl-api-key') delete headers[key];
+		}
+		headers['sl-organization-id'] = String(credentials.organizationId ?? '');
+		if (String(credentials.authentication ?? 'apiKey') === 'accessToken') {
+			headers.Authorization = `Bearer ${String(credentials.accessToken ?? '')}`;
+		} else {
+			headers['sl-api-key'] = String(credentials.apiKey ?? '');
+		}
+		return { ...requestOptions, headers };
 	};
 	test: ICredentialTestRequest = {
 		request: {

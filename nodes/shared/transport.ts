@@ -4,7 +4,8 @@ import type {
 	IDataObject,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
+import { ContractError } from './contract';
 
 export const PRODUCT_BASE_URLS = {
 	emails: 'https://emails.saleslumenapis.com',
@@ -69,8 +70,14 @@ export function mapSaleslumenApiError(
 	if (httpCode === '403') {
 		return new NodeApiError(ctx.getNode(), error, {
 			message: 'Saleslumen permission denied',
-			description:
-				'The API key needs emails.read for discover and emails.write for verify. Other products need their own read/write permissions.',
+			description: 'The credential is missing permission for this operation.',
+			itemIndex,
+		});
+	}
+	if (httpCode === '429') {
+		return new NodeApiError(ctx.getNode(), error, {
+			message: 'Saleslumen capacity exhausted',
+			description: 'Shared storage is full. Free capacity, then retry. The request was not applied.',
 			itemIndex,
 		});
 	}
@@ -86,4 +93,88 @@ export function parseNdjson(body: string): IDataObject[] {
 		.map((line) => line.trim())
 		.filter(Boolean)
 		.map((line) => JSON.parse(line) as IDataObject);
+}
+
+const LIST_CAP = 1000;
+
+export function rethrowSaleslumenError(ctx: IExecuteFunctions, error: unknown, itemIndex: number): never {
+	if (error instanceof ContractError) {
+		throw new NodeOperationError(ctx.getNode(), error.message, { itemIndex });
+	}
+	if (error instanceof NodeApiError) throw new NodeApiError(ctx.getNode(), error as unknown as JsonObject);
+	if (error instanceof NodeOperationError) throw new NodeOperationError(ctx.getNode(), error, { itemIndex });
+	throw new NodeApiError(ctx.getNode(), error as JsonObject, { itemIndex });
+}
+
+export async function assertUserAccessToken(this: IExecuteFunctions, itemIndex = 0): Promise<void> {
+	const credentials = await this.getCredentials('saleslumenApi');
+	const token = String(credentials.accessToken ?? '').trim();
+	if (credentials.authentication !== 'accessToken' || !token) {
+		throw new NodeOperationError(this.getNode(), 'A user access token is required', {
+			description:
+				'This operation rejects organization API keys. Set Authentication on the Saleslumen API credential to Access Token.',
+			itemIndex,
+		});
+	}
+}
+
+export function listPageQuery(query: IDataObject, requestTokenKey: string, token: string): IDataObject {
+	const qs: IDataObject = { ...query };
+	delete qs[requestTokenKey];
+	const cursor = token.trim();
+	if (cursor) qs[requestTokenKey] = cursor;
+	return qs;
+}
+
+export async function collectList(
+	this: IExecuteFunctions,
+	product: SaleslumenProduct,
+	itemIndex: number,
+	input: {
+		path: string;
+		itemsKey: string;
+		requestTokenKey: string;
+		responseTokenKey: string;
+		query: IDataObject;
+		returnAll: boolean;
+	},
+): Promise<IDataObject[]> {
+	const rows: IDataObject[] = [];
+	const baseQuery: IDataObject = { ...input.query };
+	delete baseQuery[input.requestTokenKey];
+	delete baseQuery[input.responseTokenKey];
+	let token =
+		typeof input.query[input.requestTokenKey] === 'string'
+			? String(input.query[input.requestTokenKey]).trim()
+			: '';
+	let lastTotalCount: number | undefined;
+	do {
+		const qs = listPageQuery(baseQuery, input.requestTokenKey, token);
+		const page = (await saleslumenApiRequest.call(
+			this,
+			product,
+			{ method: 'GET', path: input.path, qs, json: true },
+			itemIndex,
+		)) as IDataObject;
+		const items = page[input.itemsKey];
+		if (!Array.isArray(items)) {
+			throw new NodeOperationError(this.getNode(), `Saleslumen list response is missing ${input.itemsKey}`, {
+				itemIndex,
+			});
+		}
+		rows.push(...(items as IDataObject[]));
+		if (typeof page.totalCount === 'number') lastTotalCount = page.totalCount;
+		const nextToken = page[input.responseTokenKey];
+		token = typeof nextToken === 'string' ? nextToken.trim() : '';
+		if (!input.returnAll || rows.length >= LIST_CAP) break;
+	} while (token);
+	if (rows.length > 0) {
+		const trailing: IDataObject = {};
+		if (token) trailing[input.responseTokenKey] = token;
+		if (lastTotalCount !== undefined) trailing.totalCount = lastTotalCount;
+		if (Object.keys(trailing).length > 0) {
+			rows[rows.length - 1] = { ...rows[rows.length - 1], ...trailing };
+		}
+	}
+	return rows;
 }

@@ -3,10 +3,10 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
-	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeOperationError } from 'n8n-workflow';
-import { saleslumenApiRequest } from '../shared/transport';
+import { NodeOperationError } from 'n8n-workflow';
+import { scriptProjectContent, scriptRunFailure } from '../shared/contract';
+import { assertUserAccessToken, rethrowSaleslumenError, saleslumenApiRequest } from '../shared/transport';
 
 export const appsScriptProperties: INodeProperties[] = [
 	{
@@ -32,7 +32,7 @@ export const appsScriptProperties: INodeProperties[] = [
 				name: 'Run Function',
 				value: 'runFunction',
 				action: 'Run function',
-				description: 'Run a script function',
+				description: 'Run a script function. Requires an access token.',
 			},
 			{
 				name: 'Update Content',
@@ -124,12 +124,9 @@ export async function executeAppsScript(
 				)) as IDataObject;
 			} else if (operation === 'updateProjectContent') {
 				const scriptId = this.getNodeParameter('scriptId', i) as string;
-				const content = parseJson(
-					this,
-					i,
-					this.getNodeParameter('contentJson', i),
-					'Content',
-				) as IDataObject;
+				const content = scriptProjectContent(
+					parseJson(this, i, this.getNodeParameter('contentJson', i), 'Content'),
+				);
 				response = (await saleslumenApiRequest.call(
 					this,
 					'script',
@@ -142,6 +139,7 @@ export async function executeAppsScript(
 					i,
 				)) as IDataObject;
 			} else if (operation === 'runFunction') {
+				await assertUserAccessToken.call(this, i);
 				const scriptId = this.getNodeParameter('scriptId', i) as string;
 				const functionName = this.getNodeParameter('functionName', i) as string;
 				const parameters = parseJson(
@@ -166,16 +164,12 @@ export async function executeAppsScript(
 					},
 					i,
 				)) as IDataObject;
-				if (response.error) {
-					throw new NodeOperationError(
-						this.getNode(),
-						typeof response.error === 'string' ? response.error : JSON.stringify(response.error),
-						{
-							description:
-								'Apps Script returned HTTP 200 with an Operation error. Check function logs and parameters.',
-							itemIndex: i,
-						},
-					);
+				const failure = scriptRunFailure(response);
+				if (failure) {
+					throw new NodeOperationError(this.getNode(), failure, {
+						description: 'Check response.success before using result. A started failure still returns HTTP 200.',
+						itemIndex: i,
+					});
 				}
 			} else {
 				throw new NodeOperationError(
@@ -193,7 +187,7 @@ export async function executeAppsScript(
 				});
 				continue;
 			}
-			throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
+			rethrowSaleslumenError(this, error, i);
 		}
 	}
 	return returnData;

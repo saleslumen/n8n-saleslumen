@@ -3,10 +3,83 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
-	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeOperationError } from 'n8n-workflow';
-import { saleslumenApiRequest } from '../shared/transport';
+import { NodeOperationError } from 'n8n-workflow';
+import {
+	campaignUpdateBody,
+	ContractError,
+	optionalSteps,
+	organizationResourceName,
+	pageSize,
+	requireUuid,
+	resolveRequestId,
+	sequencePayload,
+	sequenceTrigger,
+	stringMap,
+	uuidList,
+	variableNames,
+} from '../shared/contract';
+import { collectList, rethrowSaleslumenError, saleslumenApiRequest } from '../shared/transport';
+
+const LIFECYCLE = [
+	'activateCampaign',
+	'archiveCampaign',
+	'completeCampaign',
+	'pauseCampaign',
+	'resumeCampaign',
+	'unarchiveCampaign',
+] as const;
+
+const CAMPAIGN_ID_OPS = [
+	...LIFECYCLE,
+	'createPerson',
+	'createSequence',
+	'deleteCampaign',
+	'deleteSequence',
+	'getCampaign',
+	'getManySequences',
+	'getSequence',
+	'setSenderAccounts',
+	'setVariables',
+	'updateCampaign',
+	'updateSequence',
+];
+
+const ETAG_OPS = [
+	...LIFECYCLE,
+	'deleteCampaign',
+	'deleteSequence',
+	'setSenderAccounts',
+	'setVariables',
+	'updateCampaign',
+	'updateSequence',
+];
+
+const REQUEST_ID_OPS = [
+	...LIFECYCLE,
+	'createCampaign',
+	'createPerson',
+	'createSequence',
+	'deleteCampaign',
+	'deleteSequence',
+	'setSenderAccounts',
+	'setVariables',
+	'updateCampaign',
+	'updateSequence',
+];
+
+const COMMANDS: Record<string, string> = {
+	activateCampaign: 'activate',
+	archiveCampaign: 'archive',
+	completeCampaign: 'complete',
+	pauseCampaign: 'pause',
+	resumeCampaign: 'resume',
+	unarchiveCampaign: 'unarchive',
+};
+
+function show(operation: string[]): INodeProperties['displayOptions'] {
+	return { show: { resource: ['campaigns'], operation } };
+}
 
 export const campaignsProperties: INodeProperties[] = [
 	{
@@ -16,97 +89,25 @@ export const campaignsProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['campaigns'] } },
 		options: [
-			{
-				name: 'Create Campaign',
-				value: 'createCampaign',
-				action: 'Create campaign',
-				description: 'Create a campaign',
-			},
-			{
-				name: 'Create Sequence',
-				value: 'createSequence',
-				action: 'Create sequence',
-				description: 'Create a sequence',
-			},
-			{
-				name: 'Create Step',
-				value: 'createStep',
-				action: 'Create step',
-				description: 'Create an email step',
-			},
-			{
-				name: 'Delete Sequence',
-				value: 'deleteSequence',
-				action: 'Delete sequence',
-				description: 'Delete a sequence',
-			},
-			{
-				name: 'Delete Step',
-				value: 'deleteStep',
-				action: 'Archive step',
-				description: 'Archive a step',
-			},
-			{
-				name: 'Enroll Person',
-				value: 'enrollPerson',
-				action: 'Enroll person',
-				description: 'Enroll a person in a campaign',
-			},
-			{
-				name: 'Get Campaign',
-				value: 'getCampaign',
-				action: 'Get campaign',
-				description: 'Get a campaign by ID',
-			},
-			{
-				name: 'Get Many Campaigns',
-				value: 'getManyCampaigns',
-				action: 'Get many campaigns',
-				description: 'List campaigns',
-			},
-			{
-				name: 'Get Many Sequences',
-				value: 'getManySequences',
-				action: 'Get many sequences',
-				description: 'List sequences',
-			},
-			{
-				name: 'Get Many Steps',
-				value: 'getManySteps',
-				action: 'Get many steps',
-				description: 'List steps',
-			},
-			{
-				name: 'Get Sequence',
-				value: 'getSequence',
-				action: 'Get sequence',
-				description: 'Get a sequence by ID',
-			},
-			{ name: 'Get Step', value: 'getStep', action: 'Get step', description: 'Get a step by ID' },
-			{
-				name: 'Reorder Steps',
-				value: 'reorderSteps',
-				action: 'Reorder sequence steps',
-				description: 'Move a step within a sequence',
-			},
-			{
-				name: 'Update Campaign',
-				value: 'updateCampaign',
-				action: 'Update campaign',
-				description: 'Update a campaign',
-			},
-			{
-				name: 'Update Sequence',
-				value: 'updateSequence',
-				action: 'Update sequence',
-				description: 'Update a sequence',
-			},
-			{
-				name: 'Update Step',
-				value: 'updateStep',
-				action: 'Update step',
-				description: 'Update a step',
-			},
+			{ name: 'Activate', value: 'activateCampaign', action: 'Activate a campaign', description: 'Activate a campaign when it is ready' },
+			{ name: 'Archive', value: 'archiveCampaign', action: 'Archive a campaign', description: 'Archive a draft, paused, or completed campaign' },
+			{ name: 'Complete', value: 'completeCampaign', action: 'Complete a campaign', description: 'Mark a campaign completed' },
+			{ name: 'Create', value: 'createCampaign', action: 'Create a campaign', description: 'Create a draft campaign and its main sequence' },
+			{ name: 'Create Person', value: 'createPerson', action: 'Create a person', description: 'Enroll one person' },
+			{ name: 'Create Sequence', value: 'createSequence', action: 'Create a sequence', description: 'Create a triggered sequence' },
+			{ name: 'Delete', value: 'deleteCampaign', action: 'Delete a campaign', description: 'Delete a draft campaign that has no deliveries' },
+			{ name: 'Delete Sequence', value: 'deleteSequence', action: 'Delete a sequence', description: 'Delete an unused triggered sequence' },
+			{ name: 'Get', value: 'getCampaign', action: 'Get a campaign', description: 'Get a campaign by ID' },
+			{ name: 'Get Many', value: 'getManyCampaigns', action: 'Get many campaigns', description: 'List campaigns' },
+			{ name: 'Get Many Sequences', value: 'getManySequences', action: 'Get many sequences', description: 'List sequences' },
+			{ name: 'Get Sequence', value: 'getSequence', action: 'Get a sequence', description: 'Get a sequence tree' },
+			{ name: 'Pause', value: 'pauseCampaign', action: 'Pause a campaign', description: 'Pause an active campaign' },
+			{ name: 'Resume', value: 'resumeCampaign', action: 'Resume a campaign', description: 'Resume a paused campaign' },
+			{ name: 'Set Sender Accounts', value: 'setSenderAccounts', action: 'Set sender accounts', description: 'Replace the campaign sender accounts' },
+			{ name: 'Set Variables', value: 'setVariables', action: 'Set campaign variables', description: 'Replace declared campaign variables' },
+			{ name: 'Unarchive', value: 'unarchiveCampaign', action: 'Unarchive a campaign', description: 'Restore an archived campaign' },
+			{ name: 'Update', value: 'updateCampaign', action: 'Update a campaign', description: 'Patch campaign fields with an update mask' },
+			{ name: 'Update Sequence', value: 'updateSequence', action: 'Update a sequence', description: 'Replace a sequence tree' },
 		],
 		default: 'createCampaign',
 	},
@@ -116,27 +117,8 @@ export const campaignsProperties: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: {
-			show: {
-				resource: ['campaigns'],
-				operation: [
-					'createSequence',
-					'createStep',
-					'deleteSequence',
-					'deleteStep',
-					'enrollPerson',
-					'getCampaign',
-					'getManySequences',
-					'getManySteps',
-					'getSequence',
-					'getStep',
-					'reorderSteps',
-					'updateCampaign',
-					'updateSequence',
-					'updateStep',
-				],
-			},
-		},
+		displayOptions: show(CAMPAIGN_ID_OPS),
+		description: 'Campaign UUID, or a campaigns/{ID} resource name',
 	},
 	{
 		displayName: 'Sequence ID',
@@ -144,62 +126,46 @@ export const campaignsProperties: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: {
-			show: {
-				resource: ['campaigns'],
-				operation: [
-					'createStep',
-					'deleteSequence',
-					'deleteStep',
-					'getManySteps',
-					'getSequence',
-					'getStep',
-					'reorderSteps',
-					'updateSequence',
-					'updateStep',
-				],
-			},
-		},
+		displayOptions: show(['deleteSequence', 'getSequence', 'updateSequence']),
+		description: 'Sequence UUID',
 	},
 	{
-		displayName: 'Step ID',
-		name: 'stepId',
-		type: 'string',
-		default: '',
-		required: true,
-		displayOptions: {
-			show: { resource: ['campaigns'], operation: ['deleteStep', 'getStep', 'updateStep'] },
-		},
-	},
-	{
-		displayName: 'Name',
-		name: 'name',
+		displayName: 'Display Name',
+		name: 'displayName',
 		type: 'string',
 		default: '',
 		required: true,
 		placeholder: 'e.g. Outbound Q3',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createCampaign'] } },
+		displayOptions: show(['createCampaign', 'createSequence']),
 	},
 	{
-		displayName: 'State',
-		name: 'state',
+		displayName: 'Visibility',
+		name: 'visibility',
 		type: 'options',
 		options: [
-			{ name: 'Draft', value: 'DRAFT' },
-			{ name: 'Active', value: 'ACTIVE' },
-			{ name: 'Paused', value: 'PAUSED' },
-			{ name: 'Completed', value: 'COMPLETED' },
+			{ name: 'All', value: 'ALL' },
+			{ name: 'Archived', value: 'ARCHIVED' },
+			{ name: 'Unarchived', value: 'UNARCHIVED' },
 		],
-		default: 'DRAFT',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createCampaign'] } },
+		default: 'UNARCHIVED',
+		displayOptions: show(['getManyCampaigns']),
 	},
 	{
-		displayName: 'Variables',
-		name: 'variables',
+		displayName: 'Etag',
+		name: 'etag',
 		type: 'string',
-		default: 'email,first_name',
-		description: 'Comma-separated campaign variable names',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createCampaign'] } },
+		default: '',
+		required: true,
+		displayOptions: show(ETAG_OPS),
+		description: 'Current resource etag from Get',
+	},
+	{
+		displayName: 'Request ID',
+		name: 'requestId',
+		type: 'string',
+		default: '',
+		displayOptions: show(REQUEST_ID_OPS),
+		description: 'Idempotency UUID. Leave empty to generate one for this execution.',
 	},
 	{
 		displayName: 'Update Fields',
@@ -207,202 +173,114 @@ export const campaignsProperties: INodeProperties[] = [
 		type: 'collection',
 		placeholder: 'Add Field',
 		default: {},
-		displayOptions: { show: { resource: ['campaigns'], operation: ['updateCampaign'] } },
+		displayOptions: show(['updateCampaign']),
 		options: [
-			{ displayName: 'Name', name: 'name', type: 'string', default: '' },
-			{
-				displayName: 'State',
-				name: 'state',
-				type: 'options',
-				options: [
-					{ name: 'Draft', value: 'DRAFT' },
-					{ name: 'Active', value: 'ACTIVE' },
-					{ name: 'Paused', value: 'PAUSED' },
-					{ name: 'Completed', value: 'COMPLETED' },
-				],
-				default: 'DRAFT',
-			},
-			{
-				displayName: 'Stop on Reply',
-				name: 'stop_on_reply',
-				type: 'boolean',
-				default: true,
-			},
+			{ displayName: 'Bounce Auto Pause Threshold (Bps)', name: 'bounce_auto_pause_threshold_bps', type: 'number', default: 500, description: 'Basis points from 1 to 10000' },
+			{ displayName: 'Content Mode', name: 'content_mode', type: 'options', options: [{ name: 'Multipart', value: 'MULTIPART' }, { name: 'Plain Text', value: 'PLAIN_TEXT' }], default: 'MULTIPART' },
+			{ displayName: 'Daily Delivery Limit', name: 'daily_delivery_limit', type: 'number', default: 1 },
+			{ displayName: 'Daily New Recipient Limit', name: 'daily_new_recipient_limit', type: 'number', default: 1 },
+			{ displayName: 'Display Name', name: 'display_name', type: 'string', default: '' },
+			{ displayName: 'Schedule', name: 'schedule', type: 'string', default: '', description: 'Resource name campaignSchedules/{ID}' },
+			{ displayName: 'Sender Provider Strategy', name: 'sender_provider_strategy', type: 'options', options: [{ name: 'Any', value: 'ANY' }, { name: 'Prefer Recipient Provider', value: 'PREFER_RECIPIENT_PROVIDER' }], default: 'ANY' },
+			{ displayName: 'Stop on Reply', name: 'stop_on_reply', type: 'boolean', default: true },
 			{ displayName: 'Track Clicks', name: 'track_clicks', type: 'boolean', default: true },
 			{ displayName: 'Track Opens', name: 'track_opens', type: 'boolean', default: true },
+			{ displayName: 'Unsubscribe Policy', name: 'unsubscribe_policy', type: 'options', options: [{ name: 'Header and Footer', value: 'HEADER_AND_FOOTER' }, { name: 'None', value: 'NONE' }], default: 'NONE' },
 		],
+	},
+	{
+		displayName: 'Variables',
+		name: 'variables',
+		type: 'string',
+		default: 'given_name,family_name',
+		displayOptions: show(['setVariables']),
+		description: 'Comma-separated variable names. Names start with a letter and use lowercase letters, digits, and underscores.',
+	},
+	{
+		displayName: 'Account IDs',
+		name: 'accountIds',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: show(['setSenderAccounts']),
+		description: 'Comma-separated sender account UUIDs',
 	},
 	{
 		displayName: 'Email',
-		name: 'email',
+		name: 'emailAddress',
 		type: 'string',
 		default: '',
-		required: true,
 		placeholder: 'e.g. alex@example.com',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['enrollPerson'] } },
+		displayOptions: show(['createPerson']),
+		description: 'Person email. Omit when the address is not known yet.',
 	},
 	{
-		displayName: 'First Name',
-		name: 'firstName',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['enrollPerson'] } },
-	},
-	{
-		displayName: 'Person State',
-		name: 'personState',
-		type: 'options',
-		options: [
-			{ name: 'Not Started', value: 'NOT_STARTED' },
-			{ name: 'Active', value: 'ACTIVE' },
-			{ name: 'Paused', value: 'PAUSED' },
-			{ name: 'Completed', value: 'COMPLETED' },
-		],
-		default: 'NOT_STARTED',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['enrollPerson'] } },
-	},
-	{
-		displayName: 'Additional Variables',
-		name: 'additionalVariables',
+		displayName: 'Variables',
+		name: 'personVariables',
 		type: 'json',
 		default: '{}',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['enrollPerson'] } },
-		description: 'Extra person variables as JSON object',
+		displayOptions: show(['createPerson']),
+		description: 'Declared campaign variables as a JSON object of strings',
 	},
 	{
-		displayName: 'Name',
-		name: 'sequenceName',
+		displayName: 'Event Type',
+		name: 'eventType',
+		type: 'options',
+		options: [
+			{ name: 'Email Clicked', value: 'EMAIL.CLICKED' },
+			{ name: 'Email Opened', value: 'EMAIL.OPENED' },
+			{ name: 'Email Replied', value: 'EMAIL.REPLIED' },
+		],
+		default: 'EMAIL.REPLIED',
+		displayOptions: show(['createSequence']),
+	},
+	{
+		displayName: 'SRL Expression',
+		name: 'srlExpression',
 		type: 'string',
 		default: '',
 		required: true,
-		placeholder: 'e.g. Primary',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createSequence'] } },
+		displayOptions: show(['createSequence']),
+		description: 'Trigger predicate',
 	},
 	{
-		displayName: 'Step Index',
-		name: 'sequenceStepIndex',
+		displayName: 'Priority',
+		name: 'priority',
 		type: 'number',
 		default: 0,
-		required: true,
-		description: 'Order index among sequences',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createSequence'] } },
+		displayOptions: show(['createSequence']),
 	},
 	{
-		displayName: 'Additional Fields',
-		name: 'sequenceAdditionalFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		default: {},
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createSequence'] } },
-		options: [
-			{ displayName: 'Description', name: 'description', type: 'string', default: '' },
-			{ displayName: 'Condition', name: 'condition', type: 'string', default: '' },
-		],
-	},
-	{
-		displayName: 'Update Fields',
-		name: 'sequenceUpdateFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		default: {},
-		displayOptions: { show: { resource: ['campaigns'], operation: ['updateSequence'] } },
-		options: [
-			{ displayName: 'Name', name: 'name', type: 'string', default: '' },
-			{ displayName: 'Description', name: 'description', type: 'string', default: '' },
-			{ displayName: 'Condition', name: 'condition', type: 'string', default: '' },
-			{ displayName: 'Step Index', name: 'step_index', type: 'number', default: 0 },
-		],
-	},
-	{
-		displayName: 'Old Index',
-		name: 'oldIndex',
+		displayName: 'Entry Delay (Seconds)',
+		name: 'entryDelaySeconds',
 		type: 'number',
 		default: 0,
-		required: true,
-		description: 'Current step position (at least one of Old/New Index must be non-zero)',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['reorderSteps'] } },
+		displayOptions: show(['createSequence']),
 	},
 	{
-		displayName: 'New Index',
-		name: 'newIndex',
-		type: 'number',
-		default: 0,
-		required: true,
-		description: 'Target step position',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['reorderSteps'] } },
+		displayName: 'Steps',
+		name: 'stepsJson',
+		type: 'json',
+		default: '[]',
+		displayOptions: show(['createSequence']),
+		description: 'Optional sequence steps. Position is array order. Each step has delay_seconds and variants with subject and body_document.',
 	},
 	{
-		displayName: 'Subject',
-		name: 'subject',
+		displayName: 'Sequence',
+		name: 'sequenceJson',
+		type: 'json',
+		default: '{}',
+		displayOptions: show(['updateSequence']),
+		description: 'Replacement tree. Include display_name, trigger, and/or steps. Read-only fields from Get are ignored.',
+	},
+	{
+		displayName: 'Update Mask',
+		name: 'updateMask',
 		type: 'string',
-		default: '',
+		default: '*',
 		required: true,
-		placeholder: 'e.g. Hello {{first_name}}',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createStep'] } },
-	},
-	{
-		displayName: 'Content',
-		name: 'content',
-		type: 'string',
-		typeOptions: { rows: 4 },
-		default: '',
-		required: true,
-		placeholder: 'e.g. Quick note for {{email}}.',
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createStep'] } },
-	},
-	{
-		displayName: 'Additional Fields',
-		name: 'stepAdditionalFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		default: {},
-		displayOptions: { show: { resource: ['campaigns'], operation: ['createStep'] } },
-		options: [
-			{ displayName: 'Step Index', name: 'step_index', type: 'number', default: 0 },
-			{ displayName: 'Variant Index', name: 'variant_index', type: 'number', default: 0 },
-			{
-				displayName: 'State',
-				name: 'state',
-				type: 'options',
-				options: [
-					{ name: 'Active', value: 'ACTIVE' },
-					{ name: 'Paused', value: 'PAUSED' },
-					{ name: 'Archived', value: 'ARCHIVED' },
-				],
-				default: 'ACTIVE',
-			},
-		],
-	},
-	{
-		displayName: 'Update Fields',
-		name: 'stepUpdateFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		default: {},
-		displayOptions: { show: { resource: ['campaigns'], operation: ['updateStep'] } },
-		options: [
-			{
-				displayName: 'Content',
-				name: 'content',
-				type: 'string',
-				typeOptions: { rows: 4 },
-				default: '',
-			},
-			{
-				displayName: 'State',
-				name: 'state',
-				type: 'options',
-				options: [
-					{ name: 'Active', value: 'ACTIVE' },
-					{ name: 'Paused', value: 'PAUSED' },
-					{ name: 'Archived', value: 'ARCHIVED' },
-				],
-				default: 'ACTIVE',
-			},
-			{ displayName: 'Step Index', name: 'step_index', type: 'number', default: 0 },
-			{ displayName: 'Subject', name: 'subject', type: 'string', default: '' },
-			{ displayName: 'Variant Index', name: 'variant_index', type: 'number', default: 0 },
-		],
+		displayOptions: show(['updateSequence']),
+		description: 'Comma-separated paths: display_name, trigger, steps, or *',
 	},
 ];
 
@@ -414,289 +292,213 @@ export async function executeCampaigns(
 	for (let i = 0; i < items.length; i++) {
 		try {
 			const operation = this.getNodeParameter('operation', i) as string;
-			let response: IDataObject | IDataObject[];
-			if (operation === 'createCampaign') {
-				const variablesRaw = this.getNodeParameter('variables', i, '') as string;
-				const variables = variablesRaw
-					.split(',')
-					.map((v) => v.trim())
-					.filter(Boolean);
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'POST',
-						path: '/v1/',
-						body: {
-							name: this.getNodeParameter('name', i) as string,
-							state: this.getNodeParameter('state', i) as string,
-							variables,
-							stop_on_reply: true,
-							track_opens: true,
-							track_clicks: true,
-						},
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getCampaign') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'GET', path: `/v1/${campaignId}`, json: true },
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getManyCampaigns') {
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'GET', path: '/v1/', json: true },
-					i,
-				)) as IDataObject[];
-			} else if (operation === 'updateCampaign') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
-				if (Object.keys(updateFields).length === 0) {
-					throw new NodeOperationError(this.getNode(), 'Add at least one update field', {
-						itemIndex: i,
-					});
-				}
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'PATCH',
-						path: `/v1/${campaignId}`,
-						body: updateFields,
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'enrollPerson') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const email = this.getNodeParameter('email', i) as string;
-				const firstName = this.getNodeParameter('firstName', i, '') as string;
-				const personState = this.getNodeParameter('personState', i) as string;
-				let extra: IDataObject = {};
-				const raw = this.getNodeParameter('additionalVariables', i, '{}') as string | IDataObject;
-				if (typeof raw === 'string') {
-					try {
-						extra = raw ? (JSON.parse(raw) as IDataObject) : {};
-					} catch {
-						throw new NodeOperationError(
-							this.getNode(),
-							'Additional Variables must be valid JSON',
-							{
-								itemIndex: i,
-							},
-						);
-					}
-				} else {
-					extra = raw;
-				}
-				const variables: IDataObject = { ...extra, email };
-				if (firstName) variables.first_name = firstName;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'POST',
-						path: `/v1/${campaignId}/people`,
-						body: { variables, state: personState },
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'createSequence') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const additional = this.getNodeParameter('sequenceAdditionalFields', i, {}) as IDataObject;
-				const body: IDataObject = {
-					name: this.getNodeParameter('sequenceName', i) as string,
-					step_index: this.getNodeParameter('sequenceStepIndex', i) as number,
-					...additional,
-				};
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'POST', path: `/v1/${campaignId}/sequences`, body, json: true },
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getSequence') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'GET', path: `/v1/${campaignId}/sequences/${sequenceId}`, json: true },
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getManySequences') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'GET', path: `/v1/${campaignId}/sequences`, json: true },
-					i,
-				)) as IDataObject[];
-			} else if (operation === 'updateSequence') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const updateFields = this.getNodeParameter('sequenceUpdateFields', i, {}) as IDataObject;
-				if (Object.keys(updateFields).length === 0) {
-					throw new NodeOperationError(this.getNode(), 'Add at least one update field', {
-						itemIndex: i,
-					});
-				}
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'PATCH',
-						path: `/v1/${campaignId}/sequences/${sequenceId}`,
-						body: updateFields,
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'deleteSequence') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{ method: 'DELETE', path: `/v1/${campaignId}/sequences/${sequenceId}` },
-					i,
-				);
-				response = { success: true, id: sequenceId };
-			} else if (operation === 'reorderSteps') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const oldIndex = this.getNodeParameter('oldIndex', i) as number;
-				const newIndex = this.getNodeParameter('newIndex', i) as number;
-				if (oldIndex === 0 && newIndex === 0) {
-					throw new NodeOperationError(
-						this.getNode(),
-						'At least one of Old Index or New Index must be non-zero',
-						{ itemIndex: i },
-					);
-				}
-				await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'POST',
-						path: `/v1/${campaignId}/sequences/${sequenceId}:batchUpdate`,
-						body: { updateStepsPosition: { oldIndex, newIndex } },
-						json: true,
-					},
-					i,
-				);
-				response = { success: true, sequence_id: sequenceId, oldIndex, newIndex };
-			} else if (operation === 'createStep') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const additional = this.getNodeParameter('stepAdditionalFields', i, {}) as IDataObject;
-				const body: IDataObject = {
-					subject: this.getNodeParameter('subject', i) as string,
-					content: this.getNodeParameter('content', i) as string,
-					type: 'EMAIL',
-					...additional,
-				};
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'POST',
-						path: `/v1/${campaignId}/sequences/${sequenceId}/steps`,
-						body,
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getStep') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const stepId = this.getNodeParameter('stepId', i) as string;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'GET',
-						path: `/v1/${campaignId}/sequences/${sequenceId}/steps/${stepId}`,
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'getManySteps') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'GET',
-						path: `/v1/${campaignId}/sequences/${sequenceId}/steps`,
-						json: true,
-					},
-					i,
-				)) as IDataObject[];
-			} else if (operation === 'updateStep') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const stepId = this.getNodeParameter('stepId', i) as string;
-				const updateFields = this.getNodeParameter('stepUpdateFields', i, {}) as IDataObject;
-				if (Object.keys(updateFields).length === 0) {
-					throw new NodeOperationError(this.getNode(), 'Add at least one update field', {
-						itemIndex: i,
-					});
-				}
-				response = (await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'PATCH',
-						path: `/v1/${campaignId}/sequences/${sequenceId}/steps/${stepId}`,
-						body: updateFields,
-						json: true,
-					},
-					i,
-				)) as IDataObject;
-			} else if (operation === 'deleteStep') {
-				const campaignId = this.getNodeParameter('campaignId', i) as string;
-				const sequenceId = this.getNodeParameter('sequenceId', i) as string;
-				const stepId = this.getNodeParameter('stepId', i) as string;
-				await saleslumenApiRequest.call(
-					this,
-					'campaigns',
-					{
-						method: 'DELETE',
-						path: `/v1/${campaignId}/sequences/${sequenceId}/steps/${stepId}`,
-					},
-					i,
-				);
-				response = { success: true, id: stepId };
-			} else {
-				throw new NodeOperationError(
-					this.getNode(),
-					`Unsupported Campaigns operation '${operation}'`,
-					{ itemIndex: i },
-				);
-			}
-			const list = Array.isArray(response) ? response : [response];
-			for (const row of list) {
-				returnData.push({ json: row as IDataObject, pairedItem: { item: i } });
-			}
+			const response = await runCampaignOperation.call(this, operation, i);
+			for (const row of asRows(response)) returnData.push({ json: row, pairedItem: { item: i } });
 		} catch (error) {
 			if (this.continueOnFail()) {
-				returnData.push({
-					json: { error: (error as Error).message },
-					pairedItem: { item: i },
-				});
+				returnData.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
 				continue;
 			}
-			throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
+			rethrowSaleslumenError(this, error, i);
 		}
 	}
 	return returnData;
+}
+
+async function runCampaignOperation(
+	this: IExecuteFunctions,
+	operation: string,
+	itemIndex: number,
+): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'createCampaign') {
+		const credentials = await this.getCredentials('saleslumenApi');
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: '/v1/campaigns',
+			body: {
+				display_name: this.getNodeParameter('displayName', itemIndex) as string,
+				organization: organizationResourceName(String(credentials.organizationId ?? '')),
+				request_id: requestId(this, itemIndex),
+			},
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'getCampaign') {
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'GET',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}`,
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'getManyCampaigns') {
+		return await collectList.call(this, 'campaigns', itemIndex, {
+			path: '/v1/campaigns',
+			itemsKey: 'campaigns',
+			requestTokenKey: 'page_token',
+			responseTokenKey: 'next_page_token',
+			query: {
+				page_size: listPageSize(this, itemIndex),
+				page_token: pageToken(this, itemIndex),
+				visibility: this.getNodeParameter('visibility', itemIndex) as string,
+			},
+			returnAll: this.getNodeParameter('returnAll', itemIndex, false) as boolean,
+		});
+	}
+	if (operation === 'updateCampaign') {
+		const fields = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'PATCH',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}`,
+			body: campaignUpdateBody(fields, etag(this, itemIndex), requestId(this, itemIndex)),
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'deleteCampaign') {
+		await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'DELETE',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}`,
+			qs: { request_id: requestId(this, itemIndex), etag: etag(this, itemIndex) },
+		}, itemIndex);
+		return { deleted: true, id: campaignId(this, itemIndex) };
+	}
+	if (COMMANDS[operation]) {
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}:${COMMANDS[operation]}`,
+			body: { etag: etag(this, itemIndex), request_id: requestId(this, itemIndex) },
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'setVariables') {
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}:setVariables`,
+			body: {
+				variables: variableNames(this.getNodeParameter('variables', itemIndex, '') as string),
+				etag: etag(this, itemIndex),
+				request_id: requestId(this, itemIndex),
+			},
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'setSenderAccounts') {
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}:setSenderAccounts`,
+			body: {
+				account_ids: uuidList(this.getNodeParameter('accountIds', itemIndex) as string, 'Account ID'),
+				etag: etag(this, itemIndex),
+				request_id: requestId(this, itemIndex),
+			},
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'createPerson') {
+		const email = (this.getNodeParameter('emailAddress', itemIndex, '') as string).trim();
+		const body: IDataObject = {
+			variables: stringMap(this.getNodeParameter('personVariables', itemIndex, '{}'), 'Variables'),
+			request_id: requestId(this, itemIndex),
+		};
+		if (email) body.email_address = email;
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/people`,
+			body,
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'getManySequences') {
+		return await collectList.call(this, 'campaigns', itemIndex, {
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/sequences`,
+			itemsKey: 'sequences',
+			requestTokenKey: 'page_token',
+			responseTokenKey: 'next_page_token',
+			query: { page_size: listPageSize(this, itemIndex), page_token: pageToken(this, itemIndex) },
+			returnAll: this.getNodeParameter('returnAll', itemIndex, false) as boolean,
+		});
+	}
+	if (operation === 'getSequence') {
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'GET',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/sequences/${sequenceId(this, itemIndex)}`,
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'createSequence') {
+		const body: IDataObject = {
+			display_name: this.getNodeParameter('displayName', itemIndex) as string,
+			trigger: sequenceTrigger({
+				eventType: this.getNodeParameter('eventType', itemIndex) as string,
+				srlExpression: this.getNodeParameter('srlExpression', itemIndex) as string,
+				priority: this.getNodeParameter('priority', itemIndex) as number,
+				entryDelaySeconds: this.getNodeParameter('entryDelaySeconds', itemIndex) as number,
+			}),
+			request_id: requestId(this, itemIndex),
+		};
+		const steps = optionalSteps(this.getNodeParameter('stepsJson', itemIndex, '[]'));
+		if (steps) body.steps = steps;
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'POST',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/sequences`,
+			body,
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'updateSequence') {
+		const mask = (this.getNodeParameter('updateMask', itemIndex) as string).trim();
+		if (!mask) throw new ContractError('Update Mask is required');
+		return (await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'PATCH',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/sequences/${sequenceId(this, itemIndex)}`,
+			body: {
+				sequence: sequencePayload(this.getNodeParameter('sequenceJson', itemIndex)),
+				update_mask: mask,
+				etag: etag(this, itemIndex),
+				request_id: requestId(this, itemIndex),
+			},
+			json: true,
+		}, itemIndex)) as IDataObject;
+	}
+	if (operation === 'deleteSequence') {
+		const id = sequenceId(this, itemIndex);
+		await saleslumenApiRequest.call(this, 'campaigns', {
+			method: 'DELETE',
+			path: `/v1/campaigns/${campaignId(this, itemIndex)}/sequences/${id}`,
+			qs: { request_id: requestId(this, itemIndex), etag: etag(this, itemIndex) },
+		}, itemIndex);
+		return { deleted: true, id };
+	}
+	throw new NodeOperationError(this.getNode(), `Unsupported Campaigns operation '${operation}'`, { itemIndex });
+}
+
+function asRows(response: IDataObject | IDataObject[]): IDataObject[] {
+	return Array.isArray(response) ? response : [response];
+}
+
+function campaignId(ctx: IExecuteFunctions, itemIndex: number): string {
+	return requireUuid(ctx.getNodeParameter('campaignId', itemIndex) as string, 'Campaign ID');
+}
+
+function sequenceId(ctx: IExecuteFunctions, itemIndex: number): string {
+	return requireUuid(ctx.getNodeParameter('sequenceId', itemIndex) as string, 'Sequence ID');
+}
+
+function etag(ctx: IExecuteFunctions, itemIndex: number): string {
+	const value = (ctx.getNodeParameter('etag', itemIndex) as string).trim();
+	if (!value) throw new ContractError('Etag is required');
+	return value;
+}
+
+function requestId(ctx: IExecuteFunctions, itemIndex: number): string {
+	return resolveRequestId(ctx.getNodeParameter('requestId', itemIndex, '') as string);
+}
+
+function listPageSize(ctx: IExecuteFunctions, itemIndex: number): number {
+	if (ctx.getNodeParameter('returnAll', itemIndex, false) as boolean) return 200;
+	return pageSize(ctx.getNodeParameter('pageSize', itemIndex, 50) as number);
+}
+
+function pageToken(ctx: IExecuteFunctions, itemIndex: number): string {
+	if (ctx.getNodeParameter('returnAll', itemIndex, false) as boolean) return '';
+	return (ctx.getNodeParameter('pageCursor', itemIndex, '') as string).trim();
 }

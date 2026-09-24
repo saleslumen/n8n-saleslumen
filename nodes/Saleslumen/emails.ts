@@ -3,10 +3,15 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
-	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
-import { parseNdjson, saleslumenApiRequest } from '../shared/transport';
+import { verifyBody } from '../shared/contract';
+import { parseNdjson, rethrowSaleslumenError, saleslumenApiRequest } from '../shared/transport';
+import {
+	assertVerifyBatchWithinLimit,
+	normalizeVerifyEmail,
+	validateVerifyStreamRows,
+} from '../shared/verify';
 
 type DiscoverResponse = {
 	kind?: string;
@@ -32,13 +37,7 @@ export const emailsProperties: INodeProperties[] = [
 				name: 'Verify',
 				value: 'verify',
 				action: 'Verify emails',
-				description: 'Run standard email verification',
-			},
-			{
-				name: 'Verify Catch-All',
-				value: 'verifyCatchAll',
-				action: 'Verify catch all emails',
-				description: 'Run catch-all email verification',
+				description: 'Verify addresses with Standard, Catch-All, or both',
 			},
 		],
 		default: 'discover',
@@ -69,7 +68,7 @@ export const emailsProperties: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		placeholder: 'e.g. nathan@example.com',
-		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		displayOptions: { show: { resource: ['emails'], operation: ['verify'] } },
 		description: 'Email to verify. Leave empty to use the email field from each input item.',
 	},
 	{
@@ -77,15 +76,28 @@ export const emailsProperties: INodeProperties[] = [
 		name: 'emailField',
 		type: 'string',
 		default: 'email',
-		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		displayOptions: { show: { resource: ['emails'], operation: ['verify'] } },
 		description: 'Input item field that holds the email when Email is empty',
+	},
+	{
+		displayName: 'Features',
+		name: 'features',
+		type: 'multiOptions',
+		required: true,
+		default: ['STANDARD'],
+		options: [
+			{ name: 'Catch-All', value: 'CATCH_ALL' },
+			{ name: 'Standard', value: 'STANDARD' },
+		],
+		displayOptions: { show: { resource: ['emails'], operation: ['verify'] } },
+		description: 'Verification to run. Both runs standard first, then catch-all for catch-all addresses.',
 	},
 	{
 		displayName: 'Batch',
 		name: 'batch',
 		type: 'boolean',
 		default: true,
-		displayOptions: { show: { resource: ['emails'], operation: ['verify', 'verifyCatchAll'] } },
+		displayOptions: { show: { resource: ['emails'], operation: ['verify'] } },
 		description: 'Whether to send all input emails in one request and fan out address results',
 	},
 	{
@@ -136,15 +148,25 @@ export async function executeEmails(
 	if (operation === 'discover') {
 		return await executeDiscover.call(this, items);
 	}
-	if (operation === 'verify' || operation === 'verifyCatchAll') {
-		const stage = operation === 'verify' ? 'standard' : 'catch_all';
+	if (operation === 'verify') {
 		const batch = this.getNodeParameter('batch', 0, true) as boolean;
-		if (batch) {
-			return await executeVerifyBatch.call(this, items, stage);
-		}
-		return await executeVerifyPerItem.call(this, items, stage);
+		if (batch) return await executeVerifyBatch.call(this, items);
+		return await executeVerifyPerItem.call(this, items);
 	}
 	throw new NodeOperationError(this.getNode(), `Unknown operation '${operation}'`);
+}
+
+function nodeApiHttpCode(error: unknown): string {
+	if (!(error instanceof NodeApiError)) return '';
+	const record = error as unknown as IDataObject;
+	return String(record.httpCode ?? record.statusCode ?? '');
+}
+
+function discoverTimedOut(ctx: IExecuteFunctions, itemIndex: number): never {
+	throw new NodeOperationError(ctx.getNode(), 'Discover timed out before success or not_found', {
+		description: 'Increase Max Wait or retry later. Pending polls and cooldown 500 responses are not billed.',
+		itemIndex,
+	});
 }
 
 async function executeDiscover(
@@ -162,22 +184,26 @@ async function executeDiscover(
 			const started = Date.now();
 			let body: DiscoverResponse;
 			while (true) {
-				body = (await saleslumenApiRequest.call(
-					this,
-					'emails',
-					{ method: 'GET', path: '/v1/tools:discover', qs: { domain, name }, json: true },
-					i,
-				)) as DiscoverResponse;
+				if (Date.now() - started > maxWaitMs) discoverTimedOut(this, i);
+				try {
+					body = (await saleslumenApiRequest.call(
+						this,
+						'emails',
+						{ method: 'GET', path: '/v1/tools:discover', qs: { domain, name }, json: true },
+						i,
+					)) as DiscoverResponse;
+				} catch (error) {
+					if (nodeApiHttpCode(error) === '500') {
+						if (Date.now() - started > maxWaitMs) discoverTimedOut(this, i);
+						await sleep(pollIntervalMs);
+						continue;
+					}
+					rethrowSaleslumenError(this, error, i);
+				}
 				const status = body.status;
 				if (status === 'success' || status === 'not_found') break;
 				if (status !== 'pending' && status !== 'running') {
 					throw new NodeOperationError(this.getNode(), `Unexpected discover status '${status}'`, {
-						itemIndex: i,
-					});
-				}
-				if (Date.now() - started > maxWaitMs) {
-					throw new NodeOperationError(this.getNode(), 'Discover timed out while still pending', {
-						description: 'Increase Max Wait or retry later. Pending polls are not billed.',
 						itemIndex: i,
 					});
 				}
@@ -221,7 +247,7 @@ async function executeDiscover(
 				});
 				continue;
 			}
-			throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
+			rethrowSaleslumenError(this, error, i);
 		}
 	}
 	return returnData;
@@ -241,21 +267,21 @@ function resolveEmail(
 
 async function verifyEmailsRequest(
 	this: IExecuteFunctions,
-	stage: 'standard' | 'catch_all',
 	emails: string[],
 	itemIndex: number,
 ): Promise<IDataObject[]> {
 	const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 	const timeout = Number(options.timeoutMs ?? 600000);
-	const path = stage === 'standard' ? '/v1/tools:verify' : '/v1/tools:verifyCatchAll';
+	const features = this.getNodeParameter('features', itemIndex, ['STANDARD']) as string[];
+	const body = verifyBody(emails, features);
 	const response = (await saleslumenApiRequest.call(
 		this,
 		'emails',
 		{
 			method: 'POST',
-			path,
-			headers: { 'Content-Type': 'text/plain', Accept: 'application/x-ndjson' },
-			body: emails.join('\n'),
+			path: '/v1/tools:verify',
+			headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+			body: JSON.stringify(body),
 			encoding: 'text',
 			json: false,
 			returnFullResponse: true,
@@ -265,22 +291,16 @@ async function verifyEmailsRequest(
 	)) as { body: string };
 	const bodyText = typeof response.body === 'string' ? response.body : String(response.body ?? '');
 	const rows = parseNdjson(bodyText);
-	const hasDone = rows.some((row) => row.done === true);
-	const streamError = rows.find((row) => row.error === true);
-	if (streamError) {
-		throw new NodeOperationError(
-			this.getNode(),
-			String(streamError.message ?? 'Verification failed'),
-			{ itemIndex },
-		);
+	const validation = validateVerifyStreamRows(rows as Array<Record<string, unknown>>, features);
+	if (validation.kind === 'stream_error') {
+		throw new NodeOperationError(this.getNode(), validation.message, { itemIndex });
 	}
-	if (!hasDone) {
+	if (validation.kind === 'incomplete') {
 		throw new NodeOperationError(
 			this.getNode(),
 			'Verification stream ended without a done summary',
 			{
-				description:
-					'Retry only unfinished addresses. Do not re-verify completed valid/invalid results.',
+				description: `Missing done summary for stage(s): ${validation.missingStages.join(', ')}. Retry the same canonical request with backoff.`,
 				itemIndex,
 			},
 		);
@@ -291,9 +311,8 @@ async function verifyEmailsRequest(
 async function executeVerifyBatch(
 	this: IExecuteFunctions,
 	items: INodeExecutionData[],
-	stage: 'standard' | 'catch_all',
 ): Promise<INodeExecutionData[]> {
-	const emails: string[] = [];
+	const rawEmails: string[] = [];
 	const sourceIndex: number[] = [];
 	for (let i = 0; i < items.length; i++) {
 		const email = resolveEmail.call(this, i, items[i]);
@@ -301,45 +320,55 @@ async function executeVerifyBatch(
 			if (this.continueOnFail()) continue;
 			throw new NodeOperationError(this.getNode(), 'Email is required', { itemIndex: i });
 		}
-		emails.push(email);
+		rawEmails.push(email);
 		sourceIndex.push(i);
 	}
-	if (emails.length === 0) {
+	if (rawEmails.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'No emails found in input');
 	}
+	const seen = new Set<string>();
+	const emails: string[] = [];
+	const batchSourceIndex: number[] = [];
+	for (let j = 0; j < rawEmails.length; j++) {
+		const normalized = normalizeVerifyEmail(rawEmails[j]);
+		if (seen.has(normalized)) continue;
+		seen.add(normalized);
+		emails.push(normalized);
+		batchSourceIndex.push(sourceIndex[j]);
+	}
+	const features = this.getNodeParameter('features', 0, ['STANDARD']) as string[];
+	assertVerifyBatchWithinLimit(emails.length, features);
 	const options = this.getNodeParameter('options', 0, {}) as IDataObject;
 	const includeSummary = Boolean(options.includeSummary);
 	try {
-		const rows = await verifyEmailsRequest.call(this, stage, emails, 0);
+		const rows = await verifyEmailsRequest.call(this, emails, 0);
 		const returnData: INodeExecutionData[] = [];
-		const lowerEmails = emails.map((e) => e.toLowerCase());
 		for (const row of rows) {
 			if (row.done === true) {
 				if (includeSummary) {
-					returnData.push({ json: row, pairedItem: { item: sourceIndex[0] ?? 0 } });
+					returnData.push({ json: row, pairedItem: { item: batchSourceIndex[0] ?? 0 } });
 				}
 				continue;
 			}
-			const email = String(row.email ?? '').toLowerCase();
-			const idx = lowerEmails.indexOf(email);
-			const itemIndex = idx >= 0 ? sourceIndex[idx] : (sourceIndex[0] ?? 0);
+			const email = normalizeVerifyEmail(String(row.email ?? ''));
+			const idx = emails.indexOf(email);
+			const itemIndex = idx >= 0 ? batchSourceIndex[idx] : (batchSourceIndex[0] ?? 0);
 			returnData.push({ json: row, pairedItem: { item: itemIndex } });
 		}
 		return returnData;
 	} catch (error) {
 		if (this.continueOnFail()) {
 			return [
-				{ json: { error: (error as Error).message }, pairedItem: { item: sourceIndex[0] ?? 0 } },
+				{ json: { error: (error as Error).message }, pairedItem: { item: batchSourceIndex[0] ?? 0 } },
 			];
 		}
-		throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: sourceIndex[0] ?? 0 });
+		rethrowSaleslumenError(this, error, batchSourceIndex[0] ?? 0);
 	}
 }
 
 async function executeVerifyPerItem(
 	this: IExecuteFunctions,
 	items: INodeExecutionData[],
-	stage: 'standard' | 'catch_all',
 ): Promise<INodeExecutionData[]> {
 	const returnData: INodeExecutionData[] = [];
 	const options = this.getNodeParameter('options', 0, {}) as IDataObject;
@@ -350,7 +379,7 @@ async function executeVerifyPerItem(
 			if (!email.includes('@')) {
 				throw new NodeOperationError(this.getNode(), 'Email is required', { itemIndex: i });
 			}
-			const rows = await verifyEmailsRequest.call(this, stage, [email], i);
+			const rows = await verifyEmailsRequest.call(this, [email], i);
 			for (const row of rows) {
 				if (row.done === true) {
 					if (includeSummary) returnData.push({ json: row, pairedItem: { item: i } });
@@ -366,7 +395,7 @@ async function executeVerifyPerItem(
 				});
 				continue;
 			}
-			throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
+			rethrowSaleslumenError(this, error, i);
 		}
 	}
 	return returnData;
