@@ -1,6 +1,6 @@
 {
 	"name": "@saleslumen/n8n-nodes-saleslumen",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Saleslumen verified community node for Emails, Campaigns, Workflows, and Apps Script",
 	"license": "MIT",
 	"homepage": "https://developers.saleslumen.com",
